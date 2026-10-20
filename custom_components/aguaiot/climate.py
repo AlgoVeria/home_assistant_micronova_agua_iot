@@ -5,6 +5,7 @@ import logging
 import numbers
 import re
 
+import voluptuous as vol
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
     ClimateEntityFeature,
@@ -16,6 +17,8 @@ from homeassistant.const import (
     PRECISION_HALVES,
     UnitOfTemperature,
 )
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import (
@@ -24,6 +27,7 @@ from homeassistant.helpers.update_coordinator import (
 from homeassistant.util import dt
 
 from .aguaiot import AguaIOTError
+from .chrono import WEEKDAYS, chrono_day_key, chrono_key, time_to_steps
 from .const import (
     AIR_VARIANTS,
     CLIMATE_CANALIZATIONS,
@@ -102,6 +106,18 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         "sync_clock",
         {},
         "sync_clock",
+    )
+    platform.async_register_entity_service(
+        "set_chrono_program",
+        {
+            vol.Required("program"): vol.All(vol.Coerce(int), vol.Range(min=1)),
+            vol.Optional("start"): cv.time,
+            vol.Optional("stop"): cv.time,
+            vol.Optional("power"): vol.Coerce(int),
+            vol.Optional("temperature"): vol.Coerce(float),
+            vol.Optional("days"): vol.All(cv.ensure_list, [vol.In(WEEKDAYS)]),
+        },
+        "set_chrono_program",
     )
 
 
@@ -381,6 +397,59 @@ class AguaIOTAirDevice(AguaIOTClimateDevice):
             )
         except (ValueError, AguaIOTError) as err:
             _LOGGER.error("Failed to set value, error: %s", err)
+
+    async def set_chrono_program(
+        self,
+        program,
+        start=None,
+        stop=None,
+        power=None,
+        temperature=None,
+        days=None,
+    ):
+        """Write the given fields of one chrono program in a single request.
+
+        Fields left out are not written, so values read from the stove are
+        never written back.
+        """
+        items = {}
+        if start is not None:
+            items[chrono_key(program, "start")] = time_to_steps(start)
+        if stop is not None:
+            items[chrono_key(program, "stop")] = time_to_steps(stop)
+        if power is not None:
+            items[chrono_key(program, "power")] = power
+        if temperature is not None:
+            items[chrono_key(program, "temperature")] = temperature
+        if days is not None:
+            for day in WEEKDAYS:
+                items[chrono_day_key(program, day)] = int(day in days)
+
+        if not items:
+            raise ServiceValidationError("No chrono program field to set")
+
+        missing = [key for key in items if key not in self._device.registers]
+        if missing:
+            raise ServiceValidationError(
+                f"Chrono program {program} not supported by this stove: {missing}"
+            )
+
+        for key, value in items.items():
+            set_min = self._device.get_register_value_min(key)
+            set_max = self._device.get_register_value_max(key)
+            if not set_min <= value <= set_max:
+                raise ServiceValidationError(
+                    f"{key} must be between {set_min} and {set_max}: {value}"
+                )
+
+        try:
+            await self._device.set_register_values(items)
+        except (ValueError, AguaIOTError) as err:
+            raise HomeAssistantError(
+                f"Failed to set chrono program {program}: {err}"
+            ) from err
+
+        await self.coordinator.async_request_refresh()
 
 
 class AguaIOTWaterDevice(AguaIOTClimateDevice):

@@ -47,3 +47,10 @@ def devices_from_fixtures(aguaiot_mock, fixture_data):
     for name, reg_map in fixture_data.items():
         devices[name] = build_device_from_fixture(aguaiot_mock, name, reg_map)
     return devices
+
+
+try:
+    import pytest_homeassistant_custom_component  # noqa: F401
+except ImportError:
+    # Home Assistant tests need pytest-homeassistant-custom-component (Linux/macOS)
+    collect_ignore = ["ha"]

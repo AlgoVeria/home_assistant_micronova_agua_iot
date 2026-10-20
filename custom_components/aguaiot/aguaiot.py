@@ -643,6 +643,54 @@ class Device:
 
         return value
 
+    def is_register_read_error(self, key):
+        """Return True when the wifi module failed to read the register."""
+        return self.get_register(key).get("value_word") == READING_ERROR_VALUE
+
+    def get_register_value_bcd(self, key):
+        """Return the value of a BCD encoded (is_hex) register.
+
+        The raw value is decoded before the formula is applied, so a raw 0x26
+        read with formula '#+2000' gives 2026.
+        """
+        register = self.get_register(key)
+        value_raw = register.get("value_raw")
+        if value_raw is None or self.is_register_read_error(key):
+            return None
+
+        if register.get("is_hex"):
+            try:
+                value_raw = str(int(f"{int(value_raw):x}"))
+            except ValueError:
+                # Not a valid BCD value
+                return None
+
+        formula = register["formula"].replace("#", value_raw).replace("Mod", "%")
+        return simple_eval(
+            formula,
+            functions={"IF": lambda a, b, c: b if a else c, "int": lambda a: int(a)},
+        )
+
+    def get_register_value_step(self, key):
+        """Return the value change caused by one raw unit, e.g. 0.5 for '#/2'."""
+        formula = self.get_register(key).get("formula")
+        if formula is None:
+            return None
+
+        def evaluate(raw):
+            return simple_eval(
+                formula.replace("#", str(raw)).replace("Mod", "%"),
+                functions={
+                    "IF": lambda a, b, c: b if a else c,
+                    "int": lambda a: int(a),
+                },
+            )
+
+        try:
+            return abs(evaluate(1) - evaluate(0))
+        except (KeyError, ValueError, TypeError):
+            return None
+
     def get_register_value_min(self, key):
         return self.get_register(key).get("set_min")
 

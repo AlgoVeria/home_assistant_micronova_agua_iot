@@ -60,15 +60,33 @@ class AguaIOTHeatingSelect(CoordinatorEntity, SelectEntity):
 
     @property
     def current_option(self):
-        return self._device.get_register_value_description(self.entity_description.key)
+        value = self._device.get_register_value_description(self.entity_description.key)
+        if value is None:
+            return None
+        return str(value)
 
     @property
     def options(self):
-        return list(
+        options = list(
             self._device.get_register_value_options(
                 self.entity_description.key
             ).values()
         )
+        if not options:
+            # No descriptions in the register map: offer the plain values
+            options = [
+                str(x)
+                for x in range(
+                    int(
+                        self._device.get_register_value_min(self.entity_description.key)
+                    ),
+                    int(
+                        self._device.get_register_value_max(self.entity_description.key)
+                    )
+                    + 1,
+                )
+            ]
+        return options
 
     async def async_select_option(self, option):
         try:

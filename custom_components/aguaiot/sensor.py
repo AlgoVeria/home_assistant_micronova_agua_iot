@@ -1,12 +1,14 @@
 import numbers
+from datetime import datetime
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
+from homeassistant.util import dt
 
-from .const import DOMAIN, SENSORS
+from .const import CLOCK_DRIFT_SENSOR, CLOCK_KEYS, DOMAIN, SENSORS
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
@@ -28,6 +30,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 )
             ):
                 sensors.append(AguaIOTHeatingSensor(coordinator, device, sensor))
+
+        if all(key in device.registers for key in CLOCK_KEYS):
+            sensors.append(
+                AguaIOTClockDriftSensor(coordinator, device, CLOCK_DRIFT_SENSOR)
+            )
 
     async_add_entities(sensors, True)
 
@@ -108,3 +115,37 @@ class AguaIOTHeatingSensor(CoordinatorEntity, SensorEntity):
                 options.append(cur_value)
 
             return options
+
+
+class AguaIOTClockDriftSensor(AguaIOTHeatingSensor):
+    """Difference between the stove clock and the Home Assistant clock"""
+
+    @property
+    def native_value(self):
+        """Return the stove clock drift in minutes."""
+        hour, minute, day, month, year = (
+            self._device.get_register_value_bcd(key) for key in CLOCK_KEYS
+        )
+        if None in (hour, minute, day, month, year):
+            return None
+
+        now = dt.now()
+        try:
+            stove_time = datetime(
+                int(year),
+                int(month),
+                int(day),
+                int(hour),
+                int(minute),
+                tzinfo=now.tzinfo,
+            )
+        except ValueError:
+            return None
+
+        return round(
+            (stove_time - now.replace(second=0, microsecond=0)).total_seconds() / 60
+        )
+
+    @property
+    def extra_state_attributes(self):
+        return None
