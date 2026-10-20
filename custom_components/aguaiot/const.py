@@ -26,7 +26,6 @@ from homeassistant.components.switch import (
 )
 from homeassistant.components.time import TimeEntityDescription
 from homeassistant.const import (
-    PERCENTAGE,
     REVOLUTIONS_PER_MINUTE,
     EntityCategory,
     Platform,
@@ -68,6 +67,8 @@ class AguaIOTSwitchEntityDescription(SwitchEntityDescription):
 @dataclass
 class AguaIOTButtonEntityDescription(ButtonEntityDescription):
     press_value: int = 0
+    # Write the pellet load duration chosen in Home Assistant instead
+    press_load_duration: bool = False
     # Stove states (status_get values) in which the button can be pressed
     status_values: tuple[int, ...] | None = None
     alarm_required: bool = False
@@ -593,9 +594,11 @@ SENSORS = (
     # The load pellet enable register depends on the stove state
     AguaIOTSensorEntityDescription(
         key="load_pellet_get",
-        name="Pellet Load Progress",
-        icon="mdi:progress-download",
-        native_unit_of_measurement=PERCENTAGE,
+        name="Pellet Load Remaining",
+        icon="mdi:timer-sand",
+        # Countdown in seconds of the running manual load
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.MEASUREMENT,
         force_enabled=True,
         raw_value=True,
@@ -660,14 +663,6 @@ SWITCHES = (
         name="ECO Stop",
         icon="mdi:leaf-off",
         device_class=SwitchDeviceClass.SWITCH,
-    ),
-    AguaIOTSwitchEntityDescription(
-        key="cleaning_brazier_set",
-        name="Brazier Cleaning",
-        icon="mdi:broom",
-        device_class=SwitchDeviceClass.SWITCH,
-        # The enable register mirrors the flag itself
-        force_enabled=True,
     ),
     AguaIOTSwitchEntityDescription(
         key="chrono_general_enable_set",
@@ -861,6 +856,25 @@ SELECTS = (
     ),
 )
 
+# Duration (seconds) written to load_pellet_set by the "Load Pellets" button.
+# Kept in Home Assistant only: changing it writes nothing to the stove.
+#
+# Its maximum is the set_max of load_pellet_set in the cloud register map
+# (100 on the Jolly Mec Botero 2), not load_pellet_max. The remote control
+# starts a 200 s load from load_pellet_max (200), but the cloud map declares
+# load_pellet_set as 0-100 and writes never exceed the register map limits.
+# For a longer load, press the button again once the countdown is over.
+LOAD_PELLET_DURATION = AguaIOTNumberEntityDescription(
+    key="load_pellet_duration",
+    name="Pellet Load Duration",
+    icon="mdi:timer-cog-outline",
+    native_step=1,
+    native_min_value=1,
+    native_unit_of_measurement=UnitOfTime.SECONDS,
+    device_class=NumberDeviceClass.DURATION,
+    entity_category=EntityCategory.CONFIG,
+)
+
 BUTTONS = (
     AguaIOTButtonEntityDescription(
         key="allarm_reset_set",
@@ -873,7 +887,8 @@ BUTTONS = (
         key="load_pellet_set",
         name="Load Pellets",
         icon="mdi:arrow-down-bold-circle-outline",
-        press_value=1,
+        # load_pellet_set takes the load duration in seconds
+        press_load_duration=True,
         # Only when the stove is off
         status_values=(0,),
     ),

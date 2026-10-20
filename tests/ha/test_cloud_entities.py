@@ -12,10 +12,14 @@ from homeassistant.const import (
     STATE_UNKNOWN,
     EntityCategory,
 )
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.core import State
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import (
+    mock_restore_cache_with_extra_data,
+)
 
 from custom_components.aguaiot.const import DOMAIN
 
@@ -40,7 +44,7 @@ EXPECTED_ENTITIES = (
         ("button", "load_pellet_set"),
         ("switch", "chrono_general_enable_set"),
         ("switch", "chrono_week_enable_set"),
-        ("switch", "cleaning_brazier_set"),
+        ("number", "load_pellet_duration"),
         ("number", "probe_correct_set"),
         ("sensor", "load_pellet_get"),
         ("sensor", "load_pellet_max"),
@@ -276,7 +280,9 @@ async def test_load_pellet_sensors(hass, setup_integration, register_map):
         raw={"load_pellet_get": 40, "load_pellet_max": 200, "status_get": 7},
     )
     # Created even when the stove is running (enable register is status based)
-    assert hass.states.get(entity_id(hass, "sensor", "load_pellet_get")).state == "40"
+    state = hass.states.get(entity_id(hass, "sensor", "load_pellet_get"))
+    assert state.state == "40"
+    assert state.attributes["unit_of_measurement"] == "s"
     assert hass.states.get(entity_id(hass, "sensor", "load_pellet_max")).state == "200"
 
 
@@ -355,7 +361,8 @@ async def test_load_pellets_only_when_off(hass, setup_integration, register_map)
     await hass.services.async_call(
         "button", "press", {ATTR_ENTITY_ID: eid}, blocking=True
     )
-    assert fake.writes == [{"load_pellet_set": 1}]
+    # Default duration: the register map maximum
+    assert fake.writes == [{"load_pellet_set": 100}]
 
 
 async def test_load_pellets_unavailable_on_read_error(
@@ -464,3 +471,88 @@ async def test_set_chrono_program_missing_map(hass, setup_integration, register_
             blocking=True,
         )
     assert fake.writes == []
+
+
+# Pellet load duration
+
+
+async def test_no_brazier_cleaning_switch(hass, setup_integration, register_map):
+    """The stove sets the flag back on its own: it is not a command."""
+    await setup_integration(register_map)
+    assert entity_id(hass, "switch", "cleaning_brazier_set") is None
+    assert entity_id(hass, "binary_sensor", "w_p_braciere_get") is not None
+
+
+async def test_load_duration_bounds(hass, setup_integration, register_map):
+    await setup_integration(register_map, raw={"load_pellet_max": 200})
+    eid = entity_id(hass, "number", "load_pellet_duration")
+    state = hass.states.get(eid)
+    # Bounded by load_pellet_set (0-100), not by load_pellet_max (200)
+    assert state.attributes["min"] == 1
+    assert state.attributes["max"] == 100
+    assert float(state.state) == 100
+    assert state.attributes["unit_of_measurement"] == "s"
+
+    er_entry = er.async_get(hass).async_get(eid)
+    assert er_entry.entity_category is EntityCategory.CONFIG
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {ATTR_ENTITY_ID: eid, "value": 200},
+            blocking=True,
+        )
+
+
+async def test_load_duration_not_written_until_press(
+    hass, setup_integration, register_map
+):
+    _, fake = await setup_integration(register_map, raw={"status_get": 0})
+    eid = entity_id(hass, "number", "load_pellet_duration")
+    await hass.services.async_call(
+        "number",
+        "set_value",
+        {ATTR_ENTITY_ID: eid, "value": 60},
+        blocking=True,
+    )
+    assert float(hass.states.get(eid).state) == 60
+    assert fake.writes == []
+
+    await hass.services.async_call(
+        "button",
+        "press",
+        {ATTR_ENTITY_ID: entity_id(hass, "button", "load_pellet_set")},
+        blocking=True,
+    )
+    assert fake.writes == [{"load_pellet_set": 60}]
+
+
+async def test_load_duration_restored(hass, setup_integration, register_map):
+    mock_restore_cache_with_extra_data(
+        hass,
+        (
+            (
+                State("number.stove_pellet_load_duration", "45"),
+                {
+                    "native_value": 45,
+                    "native_min_value": 1,
+                    "native_max_value": 100,
+                    "native_step": 1,
+                    "native_unit_of_measurement": "s",
+                },
+            ),
+        ),
+    )
+    _, fake = await setup_integration(register_map, raw={"status_get": 0})
+    eid = entity_id(hass, "number", "load_pellet_duration")
+    assert eid == "number.stove_pellet_load_duration"
+    assert float(hass.states.get(eid).state) == 45
+
+    await hass.services.async_call(
+        "button",
+        "press",
+        {ATTR_ENTITY_ID: entity_id(hass, "button", "load_pellet_set")},
+        blocking=True,
+    )
+    assert fake.writes == [{"load_pellet_set": 45}]

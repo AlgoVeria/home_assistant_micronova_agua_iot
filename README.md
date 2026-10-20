@@ -81,14 +81,18 @@ These entities are created only when the stove's register map provides the regis
 | `chrono_pN_temperature_set` | Number "Chrono PN Temperature" | Step follows the register formula (1 °C or 0.5 °C) |
 | `chrono_pN_day_<weekday>_set` | Switch "Chrono PN <Weekday>" | Disabled by default, prefer the `set_chrono_program` service |
 | `allarm_reset_set` | Button "Reset Alarm" | Available only while an alarm is active |
-| `load_pellet_set` | Button "Load Pellets" | Available only while the stove is off (state 0) |
-| `load_pellet_get` | Sensor "Pellet Load Progress" | |
+| `load_pellet_set` | Button "Load Pellets" | Starts a manual pellet load of "Pellet Load Duration" seconds. Available only while the stove is off (state 0) |
+| `load_pellet_set` | Number "Pellet Load Duration" | Configuration, stored in Home Assistant only (nothing is written until the button is pressed). Limited to the `load_pellet_set` maximum of the register map, see below |
+| `load_pellet_get` | Sensor "Pellet Load Remaining" | Countdown of the running load, in seconds |
 | `load_pellet_max` | Sensor "Pellet Load Maximum" | Diagnostic |
-| `cleaning_brazier_set` | Switch "Brazier Cleaning" | |
 | `w_p_braciere_get` | Binary sensor "Brazier Cleaning Warning" | |
 | `w_spegnimento_get` | Binary sensor "Waiting For Shutdown" | |
 | `probe_correct_set` | Number "Room Probe Correction" | Configuration, 0.5 °C steps |
 | `clock_*_set`, `calendar_*_set` | Sensor "Clock Drift" | Diagnostic: stove clock minus Home Assistant clock, in minutes. Use `aguaiot.sync_clock` to fix it |
+
+The remote control starts a manual load of `load_pellet_max` seconds (200 on a Jolly Mec Botero 2), but the cloud register map declares `load_pellet_set` as 0-100. As writes never go beyond the register map limits, a load started from Home Assistant lasts at most 100 seconds on that stove: press the button again once the countdown is over for a longer load.
+
+The brazier cleaning warning (`w_p_braciere_get`) is acknowledged from the stove or its remote control: writing `cleaning_brazier_set` from the cloud is accepted, but the stove sets the flag back on the next reading.
 
 A stove register that could not be read (raw value `0x8000`) is shown as unknown on the switches and times above.
 
