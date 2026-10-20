@@ -116,10 +116,15 @@ class AguaIOTHeatingButton(CoordinatorEntity, ButtonEntity):
                 f"{self.entity_description.name} is not available in the current stove state"
             )
 
-        try:
-            await self._device.set_register_value(
-                self.entity_description.key, self.entity_description.press_value
+        value = self.entity_description.press_value
+        if self.entity_description.press_load_duration:
+            value = self.coordinator.load_pellet_duration.get(
+                self._device.id_device,
+                self._device.get_register_value_max(self.entity_description.key),
             )
+
+        try:
+            await self._device.set_register_value(self.entity_description.key, value)
             await self.coordinator.async_request_refresh()
         except (ValueError, AguaIOTError) as err:
             _LOGGER.error(

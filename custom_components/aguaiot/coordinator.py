@@ -99,6 +99,9 @@ class AguaIOTDataUpdateCoordinator(DataUpdateCoordinator):
             "buffer_read_timeout": buffer_read_timeout,
         }
 
+        # Pellet load duration chosen in Home Assistant, per device id
+        self.load_pellet_duration = {}
+
         if connection_mode == CONNECTION_MODE_BLUETOOTH:
             self.agua = LocalBleAguaIOT(
                 hass=hass,
