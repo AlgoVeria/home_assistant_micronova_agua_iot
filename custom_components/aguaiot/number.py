@@ -72,6 +72,12 @@ class AguaIOTHeatingNumber(CoordinatorEntity, NumberEntity):
         return self._device.get_register_value(self.entity_description.key)
 
     @property
+    def native_step(self):
+        if self.entity_description.native_step is not None:
+            return self.entity_description.native_step
+        return self._device.get_register_value_step(self.entity_description.key)
+
+    @property
     def native_min_value(self):
         return self._device.get_register_value_min(self.entity_description.key)
 

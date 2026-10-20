@@ -19,8 +19,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     switches = []
     for device in agua.devices:
         for switch in SWITCHES:
-            if switch.key in device.registers and device.get_register_enabled(
-                switch.key
+            if switch.key in device.registers and (
+                getattr(switch, "force_enabled", False)
+                or device.get_register_enabled(switch.key)
             ):
                 switches.append(AguaIOTHeatingSwitch(coordinator, device, switch))
 
@@ -61,6 +62,8 @@ class AguaIOTHeatingSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def is_on(self):
         """Return the state of the sensor."""
+        if self._device.is_register_read_error(self.entity_description.key):
+            return None
         return bool(self._device.get_register_value(self.entity_description.key))
 
     async def async_turn_off(self):

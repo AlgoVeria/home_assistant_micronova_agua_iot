@@ -27,6 +27,36 @@
     "sync_clock": {
       "name": "Synchronize Stove Clock",
       "description": "Synchronize stove time and date with the current Home Assistant time and date."
+    },
+    "set_chrono_program": {
+      "name": "Set chrono program",
+      "description": "Write one chrono (weekly) program in a single request. Fields left out are not changed.",
+      "fields": {
+        "program": {
+          "name": "Program",
+          "description": "Chrono program number (1-4 on most stoves)."
+        },
+        "start": {
+          "name": "Start",
+          "description": "Start time, rounded down to 10 minutes."
+        },
+        "stop": {
+          "name": "Stop",
+          "description": "Stop time, rounded down to 10 minutes."
+        },
+        "power": {
+          "name": "Power",
+          "description": "Power level, within the stove range (0 = Silent on some stoves)."
+        },
+        "temperature": {
+          "name": "Temperature",
+          "description": "Target temperature, within the stove range."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days on which the program runs. Days left out are switched off."
+        }
+      }
     }
   },
   "options": {
@@ -54,6 +84,17 @@
     }
   },
   "selector": {
+    "weekday": {
+      "options": {
+        "monday": "Monday",
+        "tuesday": "Tuesday",
+        "wednesday": "Wednesday",
+        "thursday": "Thursday",
+        "friday": "Friday",
+        "saturday": "Saturday",
+        "sunday": "Sunday"
+      }
+    },
     "connection_mode": {
       "options": {
         "connection_cloud": "Cloud (Micronova API)",

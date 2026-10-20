@@ -6,6 +6,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntityDescription,
 )
+from homeassistant.components.button import ButtonEntityDescription
 from homeassistant.components.climate import (
     ClimateEntityDescription,
 )
@@ -23,13 +24,18 @@ from homeassistant.components.switch import (
     SwitchDeviceClass,
     SwitchEntityDescription,
 )
+from homeassistant.components.time import TimeEntityDescription
 from homeassistant.const import (
+    PERCENTAGE,
     REVOLUTIONS_PER_MINUTE,
+    EntityCategory,
     Platform,
     UnitOfPressure,
     UnitOfTemperature,
     UnitOfTime,
 )
+
+from .chrono import WEEKDAYS
 
 
 @dataclass
@@ -52,6 +58,19 @@ class AguaIOTNumberEntityDescription(NumberEntityDescription):
     force_enabled: bool = False
     hybrid_only: bool = False
     hybrid_exclude: bool = False
+
+
+@dataclass
+class AguaIOTSwitchEntityDescription(SwitchEntityDescription):
+    force_enabled: bool = False
+
+
+@dataclass
+class AguaIOTButtonEntityDescription(ButtonEntityDescription):
+    press_value: int = 0
+    # Stove states (status_get values) in which the button can be pressed
+    status_values: tuple[int, ...] | None = None
+    alarm_required: bool = False
 
 
 @dataclass
@@ -115,7 +134,12 @@ PLATFORMS = [
     Platform.SWITCH,
     Platform.NUMBER,
     Platform.SELECT,
+    Platform.BUTTON,
+    Platform.TIME,
 ]
+
+# Highest chrono program number found in the cloud register maps
+CHRONO_PROGRAMS = range(1, 7)
 
 ENDPOINTS = {
     "Alfapalm": {
@@ -293,6 +317,21 @@ BINARY_SENSORS = (
         name="External Thermostat Rear",
         icon="mdi:electric-switch",
         icon_on="mdi:electric-switch-closed",
+    ),
+    # The enable registers of these flags mirror the flag itself
+    AguaIOTBinarySensorEntityDescription(
+        key="w_p_braciere_get",
+        name="Brazier Cleaning Warning",
+        icon="mdi:fire",
+        icon_on="mdi:fire-alert",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        force_enabled=True,
+    ),
+    AguaIOTBinarySensorEntityDescription(
+        key="w_spegnimento_get",
+        name="Waiting For Shutdown",
+        icon="mdi:power-sleep",
+        force_enabled=True,
     ),
 )
 
@@ -551,6 +590,44 @@ SENSORS = (
         native_unit_of_measurement=UnitOfTime.HOURS,
         device_class=SensorDeviceClass.DURATION,
     ),
+    # The load pellet enable register depends on the stove state
+    AguaIOTSensorEntityDescription(
+        key="load_pellet_get",
+        name="Pellet Load Progress",
+        icon="mdi:progress-download",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        force_enabled=True,
+        raw_value=True,
+    ),
+    AguaIOTSensorEntityDescription(
+        key="load_pellet_max",
+        name="Pellet Load Maximum",
+        icon="mdi:progress-download",
+        native_unit_of_measurement=None,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        force_enabled=True,
+        raw_value=True,
+    ),
+)
+
+# Keys needed for the stove clock drift sensor
+CLOCK_KEYS = (
+    "clock_hour_set",
+    "clock_minute_set",
+    "calendar_day_set",
+    "calendar_month_set",
+    "calendar_year_set",
+)
+
+CLOCK_DRIFT_SENSOR = SensorEntityDescription(
+    key="clock_drift",
+    name="Clock Drift",
+    icon="mdi:clock-alert-outline",
+    native_unit_of_measurement=UnitOfTime.MINUTES,
+    device_class=SensorDeviceClass.DURATION,
+    state_class=SensorStateClass.MEASUREMENT,
+    entity_category=EntityCategory.DIAGNOSTIC,
 )
 
 SWITCHES = (
@@ -583,6 +660,50 @@ SWITCHES = (
         name="ECO Stop",
         icon="mdi:leaf-off",
         device_class=SwitchDeviceClass.SWITCH,
+    ),
+    AguaIOTSwitchEntityDescription(
+        key="cleaning_brazier_set",
+        name="Brazier Cleaning",
+        icon="mdi:broom",
+        device_class=SwitchDeviceClass.SWITCH,
+        # The enable register mirrors the flag itself
+        force_enabled=True,
+    ),
+    AguaIOTSwitchEntityDescription(
+        key="chrono_general_enable_set",
+        name="Chrono",
+        icon="mdi:calendar-clock",
+        device_class=SwitchDeviceClass.SWITCH,
+        entity_category=EntityCategory.CONFIG,
+    ),
+    AguaIOTSwitchEntityDescription(
+        key="chrono_week_enable_set",
+        name="Chrono Weekly",
+        icon="mdi:calendar-week",
+        device_class=SwitchDeviceClass.SWITCH,
+        entity_category=EntityCategory.CONFIG,
+    ),
+    *(
+        AguaIOTSwitchEntityDescription(
+            key=f"chrono_p{program}_enable_set",
+            name=f"Chrono P{program}",
+            icon="mdi:calendar-clock",
+            device_class=SwitchDeviceClass.SWITCH,
+            entity_category=EntityCategory.CONFIG,
+        )
+        for program in CHRONO_PROGRAMS
+    ),
+    *(
+        AguaIOTSwitchEntityDescription(
+            key=f"chrono_p{program}_day_{day}_set",
+            name=f"Chrono P{program} {day.capitalize()}",
+            icon="mdi:calendar-today",
+            device_class=SwitchDeviceClass.SWITCH,
+            entity_category=EntityCategory.CONFIG,
+            entity_registry_enabled_default=False,
+        )
+        for program in CHRONO_PROGRAMS
+        for day in WEEKDAYS
     ),
 )
 
@@ -644,6 +765,26 @@ NUMBERS = (
         name="Combustion Quality",
         icon="mdi:fire-circle",
         native_step=1,
+    ),
+    AguaIOTNumberEntityDescription(
+        key="probe_correct_set",
+        name="Room Probe Correction",
+        icon="mdi:thermometer-plus",
+        native_step=0.5,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=NumberDeviceClass.TEMPERATURE,
+        entity_category=EntityCategory.CONFIG,
+    ),
+    # Step follows the register formula (1 °C, or 0.5 °C for '#/2')
+    *(
+        AguaIOTNumberEntityDescription(
+            key=f"chrono_p{program}_temperature_set",
+            name=f"Chrono P{program} Temperature",
+            native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+            device_class=NumberDeviceClass.TEMPERATURE,
+            entity_category=EntityCategory.CONFIG,
+        )
+        for program in CHRONO_PROGRAMS
     ),
 )
 
@@ -709,4 +850,43 @@ SELECTS = (
         name="Fan Mode",
         icon="mdi:fan",
     ),
+    *(
+        SelectEntityDescription(
+            key=f"chrono_p{program}_power_set",
+            name=f"Chrono P{program} Power",
+            icon="mdi:fire",
+            entity_category=EntityCategory.CONFIG,
+        )
+        for program in CHRONO_PROGRAMS
+    ),
+)
+
+BUTTONS = (
+    AguaIOTButtonEntityDescription(
+        key="allarm_reset_set",
+        name="Reset Alarm",
+        icon="mdi:alarm-light-off-outline",
+        press_value=0,
+        alarm_required=True,
+    ),
+    AguaIOTButtonEntityDescription(
+        key="load_pellet_set",
+        name="Load Pellets",
+        icon="mdi:arrow-down-bold-circle-outline",
+        press_value=1,
+        # Only when the stove is off
+        status_values=(0,),
+    ),
+)
+
+# Chrono start/stop registers, in 10-minute steps
+TIMES = tuple(
+    TimeEntityDescription(
+        key=f"chrono_p{program}_{field}_set",
+        name=f"Chrono P{program} {field.capitalize()}",
+        icon="mdi:clock-outline",
+        entity_category=EntityCategory.CONFIG,
+    )
+    for program in CHRONO_PROGRAMS
+    for field in ("start", "stop")
 )

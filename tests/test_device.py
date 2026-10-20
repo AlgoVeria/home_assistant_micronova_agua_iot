@@ -583,3 +583,165 @@ class TestDeviceInfoProperties:
     def test_ble_security_code_returns_none(self, devices_from_fixtures):
         device = devices_from_fixtures["go_heat"]
         assert device.ble_security_code is None
+
+
+def _register(key, value_raw, formula="#", formula_inverse="#", **extra):
+    reg = {
+        "reg_key": key,
+        "offset": extra.pop("offset", 1),
+        "mask": 65535,
+        "formula": formula,
+        "formula_inverse": formula_inverse,
+        "set_min": 0,
+        "set_max": 65535,
+        "is_hex": False,
+        "value_raw": str(value_raw),
+    }
+    reg.update(extra)
+    return reg
+
+
+class TestIsRegisterReadError:
+    def test_read_error_detected_without_option(self, aguaiot_mock):
+        device = build_device_from_fixture(
+            aguaiot_mock,
+            "test",
+            {"chrono_p1_start_set": _register("chrono_p1_start_set", 32768)},
+        )
+        assert aguaiot_mock.reading_error_fix is False
+        assert device.is_register_read_error("chrono_p1_start_set") is True
+
+    def test_valid_read(self, aguaiot_mock):
+        device = build_device_from_fixture(
+            aguaiot_mock,
+            "test",
+            {"chrono_p1_start_set": _register("chrono_p1_start_set", 36)},
+        )
+        assert device.is_register_read_error("chrono_p1_start_set") is False
+
+    def test_unknown_register(self, aguaiot_mock):
+        device = build_device_from_fixture(aguaiot_mock, "test", {})
+        assert device.is_register_read_error("chrono_p1_start_set") is False
+
+
+class TestGetRegisterValueBcd:
+    def test_hour(self, aguaiot_mock):
+        device = build_device_from_fixture(
+            aguaiot_mock,
+            "test",
+            {"clock_hour_set": _register("clock_hour_set", 0x19, is_hex=True)},
+        )
+        # Plain value is not decoded
+        assert device.get_register_value("clock_hour_set") == 25
+        assert device.get_register_value_bcd("clock_hour_set") == 19
+
+    def test_year_formula_applied_after_decoding(self, aguaiot_mock):
+        device = build_device_from_fixture(
+            aguaiot_mock,
+            "test",
+            {
+                "calendar_year_set": _register(
+                    "calendar_year_set",
+                    0x26,
+                    formula="#+2000",
+                    formula_inverse="#-2000",
+                    is_hex=True,
+                )
+            },
+        )
+        assert device.get_register_value_bcd("calendar_year_set") == 2026
+
+    def test_not_hex_register(self, aguaiot_mock):
+        device = build_device_from_fixture(
+            aguaiot_mock,
+            "test",
+            {"calendar_day_week_set": _register("calendar_day_week_set", 2)},
+        )
+        assert device.get_register_value_bcd("calendar_day_week_set") == 2
+
+    def test_read_error(self, aguaiot_mock):
+        device = build_device_from_fixture(
+            aguaiot_mock,
+            "test",
+            {"clock_hour_set": _register("clock_hour_set", 32768, is_hex=True)},
+        )
+        assert device.get_register_value_bcd("clock_hour_set") is None
+
+    def test_invalid_bcd_digit(self, aguaiot_mock):
+        device = build_device_from_fixture(
+            aguaiot_mock,
+            "test",
+            {"clock_hour_set": _register("clock_hour_set", 0x1A, is_hex=True)},
+        )
+        assert device.get_register_value_bcd("clock_hour_set") is None
+
+    def test_missing_register(self, aguaiot_mock):
+        device = build_device_from_fixture(aguaiot_mock, "test", {})
+        assert device.get_register_value_bcd("clock_hour_set") is None
+
+
+class TestChronoWriteLimits:
+    @pytest.fixture
+    def device(self, aguaiot_mock):
+        return build_device_from_fixture(
+            aguaiot_mock,
+            "test",
+            {
+                "chrono_p1_temperature_set": _register(
+                    "chrono_p1_temperature_set",
+                    40,
+                    formula="#/2",
+                    formula_inverse="#*2",
+                    set_min=7,
+                    set_max=40,
+                ),
+                "probe_correct_set": _register(
+                    "probe_correct_set",
+                    9,
+                    formula="(#-9)/2",
+                    formula_inverse="(#*2 )+9",
+                    set_min=-4.5,
+                    set_max=4.5,
+                    offset=2,
+                ),
+            },
+        )
+
+    def test_temperature_half_degree(self, device):
+        assert device.get_register_value("chrono_p1_temperature_set") == 20
+        prepare = device._Device__prepare_value_for_writing
+        assert prepare("chrono_p1_temperature_set", 20.5) == 41
+        assert prepare("chrono_p1_temperature_set", 7) == 14
+
+    @pytest.mark.parametrize("value", [6.5, 40.5])
+    def test_temperature_out_of_range(self, device, value):
+        with pytest.raises(ValueError):
+            device._Device__prepare_value_for_writing(
+                "chrono_p1_temperature_set", value
+            )
+
+    def test_probe_correction(self, device):
+        assert device.get_register_value("probe_correct_set") == 0
+        prepare = device._Device__prepare_value_for_writing
+        assert prepare("probe_correct_set", -4.5) == 0
+        assert prepare("probe_correct_set", 1.5) == 12
+        with pytest.raises(ValueError):
+            prepare("probe_correct_set", 5)
+
+
+class TestGetRegisterValueStep:
+    @pytest.mark.parametrize(
+        "formula,expected",
+        [("#", 1), ("#/2", 0.5), ("(#-9)/2", 0.5), ("#+30", 1)],
+    )
+    def test_step_from_formula(self, aguaiot_mock, formula, expected):
+        device = build_device_from_fixture(
+            aguaiot_mock,
+            "test",
+            {"reg_set": _register("reg_set", 40, formula=formula)},
+        )
+        assert device.get_register_value_step("reg_set") == expected
+
+    def test_missing_register(self, aguaiot_mock):
+        device = build_device_from_fixture(aguaiot_mock, "test", {})
+        assert device.get_register_value_step("reg_set") is None

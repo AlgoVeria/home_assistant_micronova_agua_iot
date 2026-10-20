@@ -23,6 +23,36 @@
     "sync_clock": {
       "name": "Synchroniser l'horloge du poêle",
       "description": "Synchronise l'heure et la date du poêle avec l'heure et la date actuelles de Home Assistant."
+    },
+    "set_chrono_program": {
+      "name": "Définir un programme chrono",
+      "description": "Écrit un programme chrono (hebdomadaire) en une seule requête. Les champs omis ne sont pas modifiés.",
+      "fields": {
+        "program": {
+          "name": "Programme",
+          "description": "Numéro du programme chrono (1 à 4 sur la plupart des poêles)."
+        },
+        "start": {
+          "name": "Début",
+          "description": "Heure de début, arrondie aux 10 minutes inférieures."
+        },
+        "stop": {
+          "name": "Fin",
+          "description": "Heure de fin, arrondie aux 10 minutes inférieures."
+        },
+        "power": {
+          "name": "Puissance",
+          "description": "Niveau de puissance, dans la plage du poêle (0 = Silent sur certains poêles)."
+        },
+        "temperature": {
+          "name": "Température",
+          "description": "Température de consigne, dans la plage du poêle."
+        },
+        "days": {
+          "name": "Jours",
+          "description": "Jours où le programme s'applique. Les jours omis sont désactivés."
+        }
+      }
     }
   },
   "options": {
@@ -50,6 +80,17 @@
     }
   },
   "selector": {
+    "weekday": {
+      "options": {
+        "monday": "Lundi",
+        "tuesday": "Mardi",
+        "wednesday": "Mercredi",
+        "thursday": "Jeudi",
+        "friday": "Vendredi",
+        "saturday": "Samedi",
+        "sunday": "Dimanche"
+      }
+    },
     "connection_mode": {
       "options": {
         "connection_cloud": "Cloud (Micronova API)",
